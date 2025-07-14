@@ -7,9 +7,11 @@
 ### 安装步骤
 1. 将插件放置于 `ComfyUI/custom_nodes/` 目录下
 2. 安装依赖：
+```bash
    git clone https://github.com/swan7-py/comfyUI-VAD-speaker.git
    cd ComfyUI/custom_nodes/ComfyUI-VAD-speaker
    pip install -r requirements.txt
+```
 
 ### 模型下载
 
