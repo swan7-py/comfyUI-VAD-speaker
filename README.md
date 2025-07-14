@@ -1,6 +1,6 @@
 # ComfyUI-VAD-speaker
 
-这个小而美的插件，设计初衷是为了帮助数字人视频生成，利用语音活动检测（VAD）来完成切割，之后可以逐段进行处理，因为基于 [FunASR](https://github.com/alibaba-damo-academy/FunASR) 实现。因此也具备说话人分割的语音识别(ASR)能力。
+这是我第一次做comfy UI的插件，初衷是为了帮助数字人视频生成，利用语音活动检测（VAD）来完成切割，之后可以逐段进行处理，因为基于 [FunASR](https://github.com/alibaba-damo-academy/FunASR) 实现。因此也具备说话人分割的语音识别(ASR)能力。
 
 ## 安装
 
@@ -14,8 +14,8 @@
 ```
 
 ### 模型下载
-
-插件需要以下模型文件，请将它们下载到 `ComfyUI/models/FunASR/` 目录中：
+1、联网情况下，自动从modelscope上下载
+2、手动下载：请将它们下载到 `ComfyUI/models/FunASR/` 目录中：
 
 | 模型名称 | 对应功能 | Modelscope 链接 |
 |----------|----------|----------------|
@@ -24,24 +24,8 @@
 | `punc_ct-transformer_cn-en-common-vocab471067-large` | 标点恢复 | [下载链接](https://www.modelscope.cn/models/iic/punc_ct-transformer_cn-en-common-vocab471067-large/summary) |
 | `speech_campplus_sv_zh-cn_16k-common` | 说话人分离 | [下载链接](https://www.modelscope.cn/models/iic/speech_campplus_sv_zh-cn_16k-common/summary) |
 
-下载示例：
+模型目录：
 ```bash
-# 创建模型目录
-mkdir -p ComfyUI/models/FunASR
-cd ComfyUI/models/FunASR
-
-# 下载 VAD 模型
-git clone https://www.modelscope.cn/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch.git
-
-# 下载 ASR 模型
-git clone https://www.modelscope.cn/iic/speech_paraformer-large-vad-punc-spk_asr_nat-zh-cn.git
-
-# 下载标点恢复模型
-git clone https://www.modelscope.cn/iic/punc_ct-transformer_cn-en-common-vocab471067-large.git
-
-# 下载说话人分离模型
-git clone https://www.modelscope.cn/iic/speech_campplus_sv_zh-cn_16k-common.git
-
 ComfyUI/
 └── models/
     └── FunASR/
