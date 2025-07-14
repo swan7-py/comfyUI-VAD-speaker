@@ -5,6 +5,7 @@ import torch
 import uuid
 import json
 from funasr import AutoModel
+from modelscope import snapshot_download
 
 # 模型名称映射表
 name_maps_ms = {
@@ -82,7 +83,7 @@ class VADsplitter:
         
         if VADsplitter.infer_ins_cache is None:
             model_root = os.path.join(folder_paths.models_dir, "FunASR")
-            model_dir = os.path.join(model_root, name_maps_ms["fsmn-vad"])
+            model_dir = snapshot_download(f'iic/{name_maps_ms["fsmn-vad"]}',local_dir=f'{model_root}/{name_maps_ms["fsmn-vad"]}')
             os.makedirs(model_dir, exist_ok=True)
             
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -189,11 +190,11 @@ class FullASRProcessor:
                      preset_spk_num=0, min_voice_duration=0.3):
         if FullASRProcessor.infer_ins_cache is None:
             model_root = os.path.join(folder_paths.models_dir, "FunASR")            
-            asr_model = os.path.join(model_root, name_maps_ms["paraformer"])
-            vad_model = os.path.join(model_root, name_maps_ms["fsmn-vad"])
-            punc_model = os.path.join(model_root, name_maps_ms["ct-punc"]) if enable_punctuation else None
-            spk_model = os.path.join(model_root, name_maps_ms["cam++"]) if enable_speaker else None
-            
+            asr_model = snapshot_download(f'iic/{name_maps_ms["paraformer"]}',local_dir=f'{model_root}/{name_maps_ms["paraformer"]}')
+            vad_model = snapshot_download(f'iic/{name_maps_ms["fsmn-vad"]}',local_dir=f'{model_root}/{name_maps_ms["fsmn-vad"]}')           
+            punc_model = snapshot_download(f'iic/{name_maps_ms["ct-punc"]}',local_dir=f'{model_root}/{name_maps_ms["ct-punc"]}') if enable_punctuation else None        
+            spk_model = snapshot_download(f'iic/{name_maps_ms["cam++"]}',local_dir=f'{model_root}/{name_maps_ms["cam++"]}') if enable_speaker else None
+
             for path in [asr_model, vad_model, punc_model, spk_model]:
                 if path: os.makedirs(path, exist_ok=True)
             
