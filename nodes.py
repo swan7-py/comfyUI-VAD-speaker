@@ -24,7 +24,7 @@ class SegmentSelector:
                 "audio": ("AUDIO",),
                 "time_segments": ("STRING",),
                 "index": ("INT", {"default": 0, "min": 0, "step": 1}),
-                "fps": ("INT", {"default": 25, "min": 8, "step": 1}),
+                "fps": ("FLOAT", {"default": 25, "min": 8, "step": 1}),
                 "denoise_enable": ("BOOLEAN", {"default": False}),
             },
             "optional": {
@@ -33,7 +33,7 @@ class SegmentSelector:
             }
         }
 
-    RETURN_TYPES = ("AUDIO","FLOAT", "FLOAT", "FLOAT","INT","INT")
+    RETURN_TYPES = ("AUDIO","FLOAT", "FLOAT", "FLOAT","INT","FLOAT")
     RETURN_NAMES = ("audio_segment","start_sec", "end_sec", "duration","frame_num","FPS_out")
     FUNCTION = "select_segment"
     CATEGORY = "Swan"
