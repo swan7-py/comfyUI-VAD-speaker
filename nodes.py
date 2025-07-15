@@ -208,11 +208,14 @@ class FullASRProcessor:
                 "max_segment": ("FLOAT", {"default": 5.0, "min": 1.0, "max": 10.0, "step": 0.1}),
                 "enable_punctuation": ("BOOLEAN", {"default": True}),
                 "enable_speaker": ("BOOLEAN", {"default": True}),
+                "denoise_enable": ("BOOLEAN", {"default": False}),
                 "unload_model": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "preset_spk_num": ("INT", {"default": 0, "min": 0, "max": 10, "step": 1}),
                 "min_voice_duration": ("FLOAT", {"default": 0.3, "min": 0.1, "max": 1.0, "step": 0.05}),
+                "noise_reduction": ("INT", {"default": 12, "min":  0.01, "max": 97, "step":  0.01}),
+                "noise_floor": ("INT", {"default": -50, "min": -80, "max": -20, "step": 0.1}),
             }
         }
 
@@ -222,8 +225,8 @@ class FullASRProcessor:
     CATEGORY = "Swan"
 
     def process_audio(self, audio, vad_threshold, max_silence, max_segment, 
-                     enable_punctuation, enable_speaker, unload_model,
-                     preset_spk_num=0, min_voice_duration=0.3):
+                     enable_punctuation, enable_speaker, unload_model,denoise_enable,
+                     preset_spk_num, min_voice_duration,noise_reduction,noise_floor):
         if FullASRProcessor.infer_ins_cache is None:
             model_root = os.path.join(folder_paths.models_dir, "FunASR")
             asr_model = snapshot_download(f'iic/{name_maps_ms["paraformer"]}',local_dir=f'{model_root}/{name_maps_ms["paraformer"]}')
@@ -254,7 +257,8 @@ class FullASRProcessor:
         
         waveform = audio['waveform']
         sr = audio["sample_rate"]
-        
+        if denoise_enable:
+            waveform = AudioProcessor.apply_denoise(waveform, sr, noise_reduction,noise_floor)        
         waveform_16k = torchaudio.functional.resample(waveform, sr, 16000)
         torchaudio.save(audio_path, waveform_16k.squeeze(0), 16000)
         
@@ -326,7 +330,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "SegmentSelector":"分段选择器",
-    "FullASRProcessor": "完整ASR处理器",
+    "SegmentSelector":"音频分段选择器",
+    "FullASRProcessor": "ASR语音识别",
     "VADSplitter": "VAD语音分割器"
 }
