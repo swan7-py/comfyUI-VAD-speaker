@@ -3,34 +3,43 @@ import os
 import torchaudio
 import torch
 import uuid
-import json
 from funasr import AutoModel
 from modelscope import snapshot_download
+from .audioutils import AudioProcessor
 
-# 模型名称映射表
+# 模型名称
 name_maps_ms = {
     "paraformer": "speech_paraformer-large-vad-punc-spk_asr_nat-zh-cn",
     "fsmn-vad": "speech_fsmn_vad_zh-cn-16k-common-pytorch",
     "ct-punc": "punc_ct-transformer_cn-en-common-vocab471067-large",
     "cam++": "speech_campplus_sv_zh-cn_16k-common",
 }
+
 class SegmentSelector:
     """从VAD分割结果中选择指定段的时间信息"""
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
+                "audio": ("AUDIO",),
                 "time_segments": ("STRING",),
                 "index": ("INT", {"default": 0, "min": 0, "step": 1}),
+                "fps": ("INT", {"default": 25, "min": 8, "step": 1}),
+                "denoise_enable": ("BOOLEAN", {"default": False}),
+            },
+            "optional": {
+                "noise_reduction": ("INT", {"default": 12, "min":  0.01, "max": 97, "step":  0.01}),
+                "noise_floor": ("INT", {"default": -50, "min": -80, "max": -20, "step": 0.1}),
             }
         }
 
-    RETURN_TYPES = ("FLOAT", "FLOAT", "FLOAT")
-    RETURN_NAMES = ("start_sec", "end_sec", "duration")
+    RETURN_TYPES = ("AUDIO","FLOAT", "FLOAT", "FLOAT","INT","INT")
+    RETURN_NAMES = ("audio_segment","start_sec", "end_sec", "duration","frame_num","FPS_out")
     FUNCTION = "select_segment"
     CATEGORY = "Swan"
 
-    def select_segment(self, time_segments, index):
+    def select_segment(self,audio, time_segments, index, fps,denoise_enable,noise_reduction,noise_floor):
+
         segments = []
         for segment_str in time_segments.split(','):
             if '-' in segment_str:
@@ -49,8 +58,30 @@ class SegmentSelector:
         start = segment[0]
         end = segment[1]
         duration = end - start
-               
-        return (start, end, duration)
+        FPS_out = fps
+        frame_num = int(duration * fps)+1
+
+         # 提取音频片段 - 使用原始浮点时间值
+        waveform = audio['waveform']
+        sample_rate = audio["sample_rate"]
+        
+        # 计算开始和结束的样本位置
+        start_sample = int(start * sample_rate)
+        end_sample = int(end * sample_rate)
+        
+        
+        # 截取音频片段
+        audio_segment = waveform[..., start_sample:end_sample]
+        # 去噪
+        if denoise_enable:
+            audio_segment = AudioProcessor.apply_denoise(audio_segment, sample_rate, noise_reduction,noise_floor)
+            audio_segment = audio_segment.unsqueeze(0)
+        clipped_audio = {
+            "waveform": audio_segment,
+            "sample_rate": sample_rate,
+        }
+   
+        return (clipped_audio,start, end, duration, frame_num,FPS_out)
 
 
 class VADsplitter:
@@ -66,9 +97,12 @@ class VADsplitter:
                 "max_silence": ("FLOAT", {"default": 0.8, "min": 0.1, "max": 2.0, "step": 0.1}),
                 "max_segment": ("FLOAT", {"default": 5.0, "min": 1.0, "max": 10.0, "step": 0.1}),
                 "unload_model": ("BOOLEAN", {"default": False}),
+                "denoise_enable": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "min_voice_duration": ("FLOAT", {"default": 0.3, "min": 0.1, "max": 1.0, "step": 0.05}),
+                "noise_reduction": ("INT", {"default": 12, "min":  0.01, "max": 97, "step":  0.01}),
+                "noise_floor": ("INT", {"default": -50, "min": -80, "max": -20, "step": 0.1}),
             }
         }
 
@@ -77,7 +111,7 @@ class VADsplitter:
     FUNCTION = "vad_slice"
     CATEGORY = "Swan"
 
-    def vad_slice(self, audio, vad_threshold, max_silence, max_segment, unload_model, min_voice_duration=0.3):
+    def vad_slice(self, audio, vad_threshold, max_silence, max_segment, unload_model,denoise_enable, min_voice_duration, noise_reduction,noise_floor):
         temp_dir = folder_paths.get_temp_directory()
         os.makedirs(temp_dir, exist_ok=True)
         
@@ -102,7 +136,9 @@ class VADsplitter:
         sr = audio["sample_rate"]
         waveform = torchaudio.functional.resample(waveform, sr, 16000)
         torchaudio.save(audio_save_path, waveform.squeeze(0), 16000)
-        
+        if denoise_enable:
+            waveform = AudioProcessor.apply_denoise(waveform, 16000, noise_reduction,noise_floor)
+
         vad_result = VADsplitter.infer_ins_cache.generate(
             input=audio_save_path,
             batch_size_s=300,
@@ -189,12 +225,14 @@ class FullASRProcessor:
                      enable_punctuation, enable_speaker, unload_model,
                      preset_spk_num=0, min_voice_duration=0.3):
         if FullASRProcessor.infer_ins_cache is None:
-            model_root = os.path.join(folder_paths.models_dir, "FunASR")            
+            model_root = os.path.join(folder_paths.models_dir, "FunASR")
             asr_model = snapshot_download(f'iic/{name_maps_ms["paraformer"]}',local_dir=f'{model_root}/{name_maps_ms["paraformer"]}')
             vad_model = snapshot_download(f'iic/{name_maps_ms["fsmn-vad"]}',local_dir=f'{model_root}/{name_maps_ms["fsmn-vad"]}')           
             punc_model = snapshot_download(f'iic/{name_maps_ms["ct-punc"]}',local_dir=f'{model_root}/{name_maps_ms["ct-punc"]}') if enable_punctuation else None        
             spk_model = snapshot_download(f'iic/{name_maps_ms["cam++"]}',local_dir=f'{model_root}/{name_maps_ms["cam++"]}') if enable_speaker else None
 
+
+            
             for path in [asr_model, vad_model, punc_model, spk_model]:
                 if path: os.makedirs(path, exist_ok=True)
             
