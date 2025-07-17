@@ -39,9 +39,20 @@ class SegmentSelector:
     CATEGORY = "Swan"
 
     def select_segment(self,audio, time_segments, index, fps,denoise_enable,noise_reduction,noise_floor):
-
+            # 预处理输入 - 移除说话人标签
+        cleaned_segments = []
+        for line in time_segments.split('\n'):
+            # 移除说话人标签（如"0: "）
+            if ':' in line:
+                _, segments_part = line.split(':', 1)
+                cleaned_segments.append(segments_part.strip())
+            else:
+                cleaned_segments.append(line.strip())
+        
+        # 合并所有时间段字符串
+        combined_segments = ",".join(cleaned_segments)
         segments = []
-        for segment_str in time_segments.split(','):
+        for segment_str in combined_segments.split(','):
             if '-' in segment_str:
                 try:
                     start_str, end_str = segment_str.split('-')
@@ -219,8 +230,8 @@ class FullASRProcessor:
             }
         }
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("asr_result",)
+    RETURN_TYPES = ("STRING","STRING")
+    RETURN_NAMES = ("asr_result","vad_result")
     FUNCTION = "process_audio"
     CATEGORY = "Swan"
 
@@ -288,8 +299,9 @@ class FullASRProcessor:
             
             # 提取ASR结果
             asr_result_str = self.extract_asr_result(main_result)
-            
-            return (asr_result_str,)
+            vad_result_str = self.merge_short_segments(main_result, max_segment)
+
+            return (asr_result_str,vad_result_str)
             
         finally:
             # 清理资源
@@ -298,6 +310,137 @@ class FullASRProcessor:
             if unload_model:
                 self.unload_model()
     
+    def merge_short_segments(self, main_result, max_segment):
+        """智能合并短片段（保持原始顺序，合并连续同一说话人的短片段）"""
+        if "sentence_info" not in main_result:
+            return ""
+        
+        # 获取原始片段列表（已按时间排序）
+        segments = []
+        for sentence in main_result["sentence_info"]:
+            speaker = sentence.get("spk", "spk0")
+            start_sec = sentence.get("start", 0) / 1000.0
+            end_sec = sentence.get("end", 0) / 1000.0
+            duration = end_sec - start_sec
+            segments.append({
+                "speaker": speaker,
+                "start": start_sec,
+                "end": end_sec,
+                "duration": duration
+            })
+        
+        # 按开始时间排序以确保顺序正确
+        segments.sort(key=lambda x: x["start"])
+        
+        # 处理片段序列（保持对话顺序）
+        final_segments = []
+        current_segment = None
+        
+        for seg in segments:
+            # 如果是第一个片段
+            if current_segment is None:
+                current_segment = seg
+                continue
+            
+            # 检查是否同一说话人
+            if current_segment["speaker"] == seg["speaker"]:
+                # 计算合并后时长
+                merged_duration = seg["end"] - current_segment["start"]
+                
+                # 检查合并后是否不超过最大时长
+                if merged_duration <= max_segment:
+                    # 合并片段
+                    current_segment["end"] = seg["end"]
+                    current_segment["duration"] = merged_duration
+                else:
+                    # 不能合并，保存当前片段
+                    final_segments.append(current_segment.copy())
+                    
+                    # 检查当前片段是否短于最大时长（可能是单独短片段）
+                    if seg["duration"] <= max_segment:
+                        current_segment = seg
+                    else:
+                        # 当前片段太长，需要切割
+                        self.split_and_add_segment(final_segments, seg, max_segment)
+                        current_segment = None
+            else:
+                # 说话人不同，保存当前片段
+                final_segments.append(current_segment.copy())
+                current_segment = seg
+        
+        # 添加最后一个片段
+        if current_segment is not None:
+            if current_segment["duration"] <= max_segment:
+                final_segments.append(current_segment)
+            else:
+                # 切割长片段
+                self.split_and_add_segment(final_segments, current_segment, max_segment)
+        
+        # 生成结果字符串
+        output_lines = []
+        current_speaker = None
+        time_ranges = []
+        
+        # 确保按时间顺序处理
+        final_segments.sort(key=lambda x: x["start"])
+        
+        if final_segments:
+            # 创建新列表存放调整后的片段
+            adjusted_segments = []
+            
+            for i in range(len(final_segments)):
+                current = final_segments[i]
+                # 如果是最后一个片段，保持原结束时间
+                if i == len(final_segments) - 1:
+                    adjusted_segments.append(current)
+                else:
+                    # 当前片段的结束时间设置为下一个片段的开始时间
+                    next_start = final_segments[i+1]["start"]
+                    adjusted_segments.append({
+                        "speaker": current["speaker"],
+                        "start": current["start"],
+                        "end": next_start,
+                        "duration": next_start - current["start"]
+                    })
+            
+            final_segments = adjusted_segments
+
+        for seg in final_segments:
+            if current_speaker is None:
+                current_speaker = seg["speaker"]
+            
+            if seg["speaker"] == current_speaker:
+                # 同一说话人，添加时间范围
+                time_ranges.append(f"{seg['start']:.2f}-{seg['end']:.2f}")
+            else:
+                # 说话人变化，保存当前行
+                output_lines.append(f"{current_speaker}: {', '.join(time_ranges)}")
+                # 重置为新说话人
+                current_speaker = seg["speaker"]
+                time_ranges = [f"{seg['start']:.2f}-{seg['end']:.2f}"]
+        
+        # 添加最后一行
+        if current_speaker and time_ranges:
+            output_lines.append(f"{current_speaker}: {', '.join(time_ranges)}")
+        
+        return "\n".join(output_lines)
+    
+    def split_and_add_segment(self, segment_list, segment, max_duration):
+        """切割长片段并添加到结果列表"""
+        duration = segment["duration"]
+        num_segments = int(duration // max_duration) + 1
+        seg_duration = duration / num_segments
+        
+        for i in range(num_segments):
+            seg_start = segment["start"] + i * seg_duration
+            seg_end = min(segment["start"] + (i + 1) * seg_duration, segment["end"])
+            
+            segment_list.append({
+                "speaker": segment["speaker"],
+                "start": seg_start,
+                "end": seg_end,
+                "duration": seg_end - seg_start
+            })
     
     def extract_asr_result(self, main_result):
         """从结果中提取ASR文本结果"""
@@ -323,14 +466,17 @@ class FullASRProcessor:
                 torch.cuda.empty_cache()
             print("FullASRProcessor: 模型已卸载")
 
+    
+
+
 NODE_CLASS_MAPPINGS = {
     "SegmentSelector": SegmentSelector,
     "FullASRProcessor": FullASRProcessor,
-    "VADSplitter": VADsplitter
+    "VADSplitter": VADsplitter,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SegmentSelector":"音频分段选择器",
     "FullASRProcessor": "ASR语音识别",
-    "VADSplitter": "VAD语音分割器"
+    "VADSplitter": "VAD语音分割器",
 }
