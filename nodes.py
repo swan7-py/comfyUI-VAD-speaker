@@ -443,20 +443,38 @@ class FullASRProcessor:
             })
     
     def extract_asr_result(self, main_result):
-        """从结果中提取ASR文本结果"""
+        """从结果中提取ASR文本结果并格式化为带说话人标签的SRT字幕"""
         if "sentence_info" not in main_result:
             return ""
         
-        asr_lines = []
-        for sentence in main_result["sentence_info"]:
+        srt_lines = []
+        for idx, sentence in enumerate(main_result["sentence_info"], start=1):
             speaker = sentence.get("spk", "spk0")
             text = sentence.get("text", "")
-            start = sentence.get("start", 0) / 1000.0
-            end = sentence.get("end", 0) / 1000.0
+            if not text:  # 跳过空文本
+                continue
+                
+            start_ms = sentence.get("start", 0)
+            end_ms = sentence.get("end", 0)
             
-            asr_lines.append(f"{speaker}: {text} [{start:.2f}-{end:.2f}]")
+            # 转换为SRT时间格式 (HH:MM:SS,mmm)
+            start_time = self._ms_to_srt_time(start_ms)
+            end_time = self._ms_to_srt_time(end_ms)
+            
+            # 构建SRT块（添加说话人标签）
+            srt_lines.append(f"{idx}")
+            srt_lines.append(f"{start_time} --> {end_time}")
+            srt_lines.append(f"[{speaker}] {text}")
+            srt_lines.append("")  # 空行分隔
         
-        return "\n".join(asr_lines)
+        return "\n".join(srt_lines)
+
+    def _ms_to_srt_time(self, milliseconds):
+        """将毫秒转换为SRT时间格式 (HH:MM:SS,mmm)"""
+        seconds, ms = divmod(milliseconds, 1000)
+        minutes, seconds = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        return f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d},{int(ms):03d}"
     
     def unload_model(self):
         """卸载模型释放资源"""
@@ -470,13 +488,13 @@ class FullASRProcessor:
 
 
 NODE_CLASS_MAPPINGS = {
-    "SegmentSelector": SegmentSelector,
+    "AudioSegmentSelector": SegmentSelector,
     "FullASRProcessor": FullASRProcessor,
     "VADSplitter": VADsplitter,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "SegmentSelector":"音频分段选择器",
+    "AudioSegmentSelector":"音频分段选择器",
     "FullASRProcessor": "ASR语音识别",
     "VADSplitter": "VAD语音分割器",
 }
