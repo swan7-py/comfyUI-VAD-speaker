@@ -1,3 +1,4 @@
 funasr
 modelscope
 torchaudio
+subprocess
